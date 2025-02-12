@@ -1,0 +1,131 @@
+---
+kind: Namespace
+apiVersion: v1
+metadata:
+  name: restcountries-namespace
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: restcountries-config
+  namespace: restcountries-namespace
+data:
+  SPRING_PROFILES_ACTIVE: 'mariadb'
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: restcountries-secret
+  namespace: restcountries-namespace
+type: Opaque
+data:
+  MYSQL_ROOT_PASSWORD: cm9vdA==
+  MYSQL_PASSWORD: cm9vdA==
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: mariadb
+  namespace: restcountries-namespace
+spec:
+  serviceName: mariadb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+        - name: mariadb
+          image: mariadb:latest
+          envFrom:
+            - secretRef:
+                name: restcountries-secret
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mariadb-data
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mariadb-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: restcountries
+  namespace: restcountries-namespace
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: restcountries
+  template:
+    metadata:
+      labels:
+        app: restcountries
+    spec:
+      containers:
+        - name: restcountries
+          image: grki24/restcountries
+          envFrom:
+            - configMapRef:
+                name: restcountries-config
+            - secretRef:
+                name: restcountries-secret
+          ports:
+            - containerPort: 8080
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: restcountries-service
+  namespace: restcountries-namespace
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: restcountries
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: mariadb-service
+  namespace: restcountries-namespace
+spec:
+  selector:
+    app: mariadb
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: restcountries-ingress
+  namespace: restcountries-namespace
+  annotations:
+    ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  rules:
+     - http:
+         paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: restcountries-service
+                port:
+                  number: 8080
